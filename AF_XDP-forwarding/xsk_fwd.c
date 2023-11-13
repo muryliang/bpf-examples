@@ -22,11 +22,13 @@
 #include <linux/err.h>
 #include <linux/if_link.h>
 #include <linux/if_xdp.h>
+#include <linux/ip.h>
 
 #include <xdp/libxdp.h>
 #include <xdp/xsk.h>
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#define STRERR_BUFSIZE          1024
 
 typedef __u64 u64;
 typedef __u32 u32;
@@ -414,7 +416,7 @@ bcache_prod(struct bcache *bc, u64 buffer)
 #endif
 
 #ifndef MAX_BURST_TX
-#define MAX_BURST_TX 64
+#define MAX_BURST_TX 1
 #endif
 
 struct burst_rx {
@@ -470,12 +472,122 @@ port_free(struct port *p)
 	free(p);
 }
 
+static struct xdp_program* load_xdp_program(struct port_params *params)
+{
+	char errmsg[STRERR_BUFSIZE];
+	int err;
+
+	struct xdp_program *xdp_prog = xdp_program__open_file("xsk_kern.o", NULL, NULL);
+	err = libxdp_get_error(xdp_prog);
+	if (err) {
+		libxdp_strerror(err, errmsg, sizeof(errmsg));
+		fprintf(stderr, "ERROR: program loading failed: %s\n", errmsg);
+		exit(EXIT_FAILURE);
+	}
+
+    /*
+	err = xdp_program__set_xdp_frags_support(xdp_prog, opt_frags);
+	if (err) {
+		libxdp_strerror(err, errmsg, sizeof(errmsg));
+		fprintf(stderr, "ERROR: Enable frags support failed: %s\n", errmsg);
+		exit(EXIT_FAILURE);
+	}
+    */
+
+	err = xdp_program__attach(xdp_prog, if_nametoindex(params->iface), XDP_MODE_NATIVE, 0);
+	if (err) {
+		libxdp_strerror(err, errmsg, sizeof(errmsg));
+		fprintf(stderr, "ERROR: attaching program failed: %s\n", errmsg);
+		exit(EXIT_FAILURE);
+	}
+    return xdp_prog;
+}
+
+static int lookup_bpf_map(int prog_fd)
+{
+	__u32 i, *map_ids, num_maps, prog_len = sizeof(struct bpf_prog_info);
+	__u32 map_len = sizeof(struct bpf_map_info);
+	struct bpf_prog_info prog_info = {};
+	int fd, err, xsks_map_fd = -ENOENT;
+	struct bpf_map_info map_info;
+
+	err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+	if (err)
+		return err;
+
+	num_maps = prog_info.nr_map_ids;
+
+	map_ids = calloc(prog_info.nr_map_ids, sizeof(*map_ids));
+	if (!map_ids)
+		return -ENOMEM;
+
+	memset(&prog_info, 0, prog_len);
+	prog_info.nr_map_ids = num_maps;
+	prog_info.map_ids = (__u64)(unsigned long)map_ids;
+
+	err = bpf_obj_get_info_by_fd(prog_fd, &prog_info, &prog_len);
+	if (err) {
+		free(map_ids);
+		return err;
+	}
+
+	for (i = 0; i < prog_info.nr_map_ids; i++) {
+		fd = bpf_map_get_fd_by_id(map_ids[i]);
+		if (fd < 0)
+			continue;
+
+		memset(&map_info, 0, map_len);
+		err = bpf_obj_get_info_by_fd(fd, &map_info, &map_len);
+		if (err) {
+			close(fd);
+			continue;
+		}
+
+		if (!strncmp(map_info.name, "xsks_map", sizeof(map_info.name)) &&
+		    map_info.key_size == 4 && map_info.value_size == 4) {
+			xsks_map_fd = fd;
+			break;
+		}
+
+		close(fd);
+	}
+
+	free(map_ids);
+	return xsks_map_fd;
+}
+
+static void enter_xsks_into_map(struct xdp_program *xdp_prog, struct xsk_socket *xsk)
+{
+	int xsks_map;
+	int key = 0;
+
+	xsks_map = lookup_bpf_map(xdp_program__fd(xdp_prog));
+	if (xsks_map < 0) {
+		fprintf(stderr, "ERROR: no xsks map found: %s\n",
+			strerror(xsks_map));
+			exit(EXIT_FAILURE);
+	}
+
+    {
+		int fd = xsk_socket__fd(xsk);
+		int ret;
+
+		key = 0;
+		ret = bpf_map_update_elem(xsks_map, &key, &fd, 0);
+		if (ret) {
+			fprintf(stderr, "ERROR: bpf_map_update_elem\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+}
+
 static struct port *
 port_init(struct port_params *params)
 {
 	struct port *p;
 	u32 umem_fq_size, pos = 0;
 	int status, i;
+    struct xdp_program *xdp_prog;
 
 	/* Memory allocation and initialization. */
 	p = calloc(sizeof(struct port), 1);
@@ -493,6 +605,9 @@ port_init(struct port_params *params)
 		port_free(p);
 		return NULL;
 	}
+
+    // load bpf program
+    xdp_prog = load_xdp_program(params);
 
 	/* xsk socket. */
 	status = xsk_socket__create_shared(&p->xsk,
@@ -518,6 +633,8 @@ port_init(struct port_params *params)
 
 	xsk_ring_prod__submit(&p->umem_fq, umem_fq_size);
 	p->umem_fq_initialized = 1;
+
+    enter_xsks_into_map(xdp_prog, p->xsk);
 
 	return p;
 }
@@ -645,16 +762,38 @@ struct thread_data {
 	int quit;
 };
 
+/*
+ * if src ub1_enp7, set src ub2_enp8, dst ub3_enp7
+ * if src ub2_enp8, set src ub3_enp8, dst ub4_enp7
+ * if src ub4_enp7, set src ub3_enp7, dst ub2_enp8
+ * if src ub3_enp7, set src ub2_enp7, dst ub1_enp7
+ */
 static void swap_mac_addresses(void *data)
 {
+    static uint8_t mac_ub1_enp7[ETH_ALEN] = {0x52, 0x54, 0x00, 0xfe, 0xd8, 0x4b};
+    static uint8_t mac_ub2_enp7[ETH_ALEN] = {0x52, 0x54, 0x00, 0x97, 0x15, 0x59};
+    static uint8_t mac_ub2_enp8[ETH_ALEN] = {0x52, 0x54, 0x00, 0x75, 0x46, 0x88};
+    static uint8_t mac_ub3_enp7[ETH_ALEN] = {0x52, 0x54, 0x00, 0x5d, 0x45, 0x86};
+    static uint8_t mac_ub3_enp8[ETH_ALEN] = {0x52, 0x54, 0x00, 0x3e, 0x8e, 0xd2};
+    static uint8_t mac_ub4_enp7[ETH_ALEN] = {0x52, 0x54, 0x00, 0x54, 0x9f, 0x06};
 	struct ether_header *eth = (struct ether_header *)data;
+//    struct iphdr *iph = (void*)(eth + 1);
 	struct ether_addr *src_addr = (struct ether_addr *)&eth->ether_shost;
 	struct ether_addr *dst_addr = (struct ether_addr *)&eth->ether_dhost;
-	struct ether_addr tmp;
 
-	tmp = *src_addr;
-	*src_addr = *dst_addr;
-	*dst_addr = tmp;
+    if (!memcmp(src_addr, mac_ub1_enp7, ETH_ALEN)) {
+        memcpy(src_addr, mac_ub2_enp8, ETH_ALEN);
+        memcpy(dst_addr, mac_ub3_enp7, ETH_ALEN);
+    }  else if (!memcmp(src_addr, mac_ub2_enp8, ETH_ALEN)) {
+        memcpy(src_addr, mac_ub3_enp8, ETH_ALEN);
+        memcpy(dst_addr, mac_ub4_enp7, ETH_ALEN);
+    }  else if (!memcmp(src_addr, mac_ub4_enp7, ETH_ALEN)) {
+        memcpy(src_addr, mac_ub3_enp7, ETH_ALEN);
+        memcpy(dst_addr, mac_ub2_enp8, ETH_ALEN);
+    }  else if (!memcmp(src_addr, mac_ub3_enp7, ETH_ALEN)) {
+        memcpy(src_addr, mac_ub2_enp7, ETH_ALEN);
+        memcpy(dst_addr, mac_ub1_enp7, ETH_ALEN);
+    }
 }
 
 static void *
@@ -726,7 +865,7 @@ static const struct port_params port_params_default = {
 	.xsk_cfg = {
 		.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
 		.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
-		.libxdp_flags = 0,
+		.libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
 		.xdp_flags = XDP_FLAGS_DRV_MODE,
 		.bind_flags = XDP_USE_NEED_WAKEUP,
 	},

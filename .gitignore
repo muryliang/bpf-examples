@@ -5,3 +5,12 @@ compile_commands.json
 *.o
 *.skel.h
 lib/libbpf-install/
+
+AF_XDP-example/xdpsock
+ktrace-CO-RE/ktrace01
+pping/pping
+tc-policy/tc_txq_policy
+traffic-pacing-edt/xdp_cpumap_loader
+xdp-synproxy/xdp_synproxy
+AF_XDP-forwarding/xsk_fwd
+
