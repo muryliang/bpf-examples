@@ -87,7 +87,7 @@ SEC("xdp") int xdp_xsk(struct xdp_md *ctx)
     }
 //    bpf_printk("forward to %d:%d\n", ctx->ingress_ifindex, ctx->rx_queue_index);
 
-//    return swap_mac_addresses(eth);
+   // return swap_mac_addresses(eth);
 	return bpf_redirect_map(&xsks_map, ctx->rx_queue_index, XDP_DROP);
 }
 
