@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <netinet/ether.h>
+#include <errno.h>
 #include <net/if.h>
 
 #include <linux/err.h>
@@ -124,6 +125,8 @@ struct bpool {
 	struct xsk_ring_cons umem_cq;
 	struct xsk_umem *umem;
 };
+
+static void remove_xdp_program(void);
 
 static struct bpool *
 bpool_init(struct bpool_params *params,
@@ -581,6 +584,40 @@ static void enter_xsks_into_map(struct xdp_program *xdp_prog, struct xsk_socket 
 	}
 }
 
+static void __exit_with_error(int error, const char *file, const char *func,
+			      int line)
+{
+	fprintf(stderr, "%s:%s:%i: errno: %d/\"%s\"\n", file, func,
+		line, error, strerror(error));
+
+    remove_xdp_program();
+	exit(EXIT_FAILURE);
+}
+
+#define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, __LINE__)
+
+static void apply_setsockopt(struct xsk_socket *xsk)
+{
+	int sock_opt;
+
+
+	sock_opt = 1;
+	if (setsockopt(xsk_socket__fd(xsk), SOL_SOCKET, SO_PREFER_BUSY_POLL,
+		       (void *)&sock_opt, sizeof(sock_opt)) < 0)
+		exit_with_error(errno);
+
+	sock_opt = 20;
+	if (setsockopt(xsk_socket__fd(xsk), SOL_SOCKET, SO_BUSY_POLL,
+		       (void *)&sock_opt, sizeof(sock_opt)) < 0)
+		exit_with_error(errno);
+
+	sock_opt = MAX_BURST_RX;
+	if (setsockopt(xsk_socket__fd(xsk), SOL_SOCKET, SO_BUSY_POLL_BUDGET,
+		       (void *)&sock_opt, sizeof(sock_opt)) < 0)
+		exit_with_error(errno);
+}
+
+
 static struct port *
 port_init(struct port_params *params)
 {
@@ -623,6 +660,7 @@ port_init(struct port_params *params)
 		port_free(p);
 		return NULL;
 	}
+    apply_setsockopt(p->xsk);
 
 	/* umem fq. */
 	xsk_ring_prod__reserve(&p->umem_fq, umem_fq_size, &pos);
@@ -867,7 +905,8 @@ static const struct port_params port_params_default = {
 		.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
 		.libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
 		.xdp_flags = XDP_FLAGS_DRV_MODE,
-		.bind_flags = XDP_USE_NEED_WAKEUP,
+//		.bind_flags = XDP_USE_NEED_WAKEUP,
+		.bind_flags = 0,
 	},
 
 	.bp = NULL,
