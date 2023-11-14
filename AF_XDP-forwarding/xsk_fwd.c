@@ -660,7 +660,7 @@ port_init(struct port_params *params)
 		port_free(p);
 		return NULL;
 	}
-    apply_setsockopt(p->xsk);
+   apply_setsockopt(p->xsk);
 
 	/* umem fq. */
 	xsk_ring_prod__reserve(&p->umem_fq, umem_fq_size, &pos);
@@ -906,6 +906,7 @@ static const struct port_params port_params_default = {
 		.libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
 		.xdp_flags = XDP_FLAGS_DRV_MODE,
 //		.bind_flags = XDP_USE_NEED_WAKEUP,
+//		.bind_flags = XDP_COPY,
 		.bind_flags = 0,
 	},
 
