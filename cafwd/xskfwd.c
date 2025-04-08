@@ -433,6 +433,7 @@ struct port_params {
 	struct bpool *bp;
 	const char *iface;
 	u32 iface_queue;
+	struct ether_addr dstmac;
 };
 
 struct port {
@@ -645,16 +646,23 @@ struct thread_data {
 	int quit;
 };
 
-static void swap_mac_addresses(void *data)
+// static void swap_mac_addresses(void *data)
+// {
+// 	struct ether_header *eth = (struct ether_header *)data;
+// 	struct ether_addr *src_addr = (struct ether_addr *)&eth->ether_shost;
+// 	struct ether_addr *dst_addr = (struct ether_addr *)&eth->ether_dhost;
+// 	struct ether_addr tmp;
+
+// 	tmp = *src_addr;
+// 	*src_addr = *dst_addr;
+// 	*dst_addr = tmp;
+// }
+
+static void set_mac_addresses(void *data, struct ether_addr *dstmac)
 {
 	struct ether_header *eth = (struct ether_header *)data;
-	struct ether_addr *src_addr = (struct ether_addr *)&eth->ether_shost;
 	struct ether_addr *dst_addr = (struct ether_addr *)&eth->ether_dhost;
-	struct ether_addr tmp;
-
-	tmp = *src_addr;
-	*src_addr = *dst_addr;
-	*dst_addr = tmp;
+	memcpy(dst_addr, dstmac, sizeof(*dst_addr));
 }
 
 static void *
@@ -687,6 +695,7 @@ thread_func(void *arg)
 						     addr);
 
 //			swap_mac_addresses(pkt);
+			set_mac_addresses(pkt, &port_rx->params.dstmac);
 
 			btx->addr[btx->n_pkts] = brx->addr[j];
 			btx->len[btx->n_pkts] = brx->len[j];
@@ -731,6 +740,7 @@ static const struct port_params port_params_default = {
 		.libxdp_flags = 0,
 		.xdp_flags = XDP_FLAGS_DRV_MODE,
 //		.bind_flags = XDP_USE_NEED_WAKEUP,
+//		.bind_flags = XDP_ZEROCOPY,
 		.bind_flags = 0,
 	},
 
@@ -782,6 +792,9 @@ print_usage(char *prog_name)
 		"               (INTERFACE, QUEUE) pair specified one\n"
 		"               forwarding port. Default: %u. May be invoked\n"
 		"               multiple times.\n"
+		"\n"
+		"-m DST_MAC     Destination mac address to change to for packet\n"
+		"				got from this port\n"
 		"\n";
 	printf(usage,
 	       prog_name,
@@ -789,9 +802,25 @@ print_usage(char *prog_name)
 	       port_params_default.iface_queue);
 }
 
+static int parse_mac_address(const char *mac_str, struct ether_addr *mac_addr) {
+    // Use ether_aton to convert the string to a struct ether_addr
+    struct ether_addr *result = ether_aton(mac_str);
+
+    if (result == NULL) {
+        // Conversion failed
+        return -1;
+    }
+
+    // Copy the result to the provided struct ether_addr
+    memcpy(mac_addr, result, sizeof(struct ether_addr));
+    return 0;
+}
+
+
 static int
 parse_args(int argc, char **argv)
 {
+	int ret = 0;
 	struct option lgopts[] = {
 		{ NULL,  0, 0, 0 }
 	};
@@ -799,7 +828,7 @@ parse_args(int argc, char **argv)
 
 	/* Parse the input arguments. */
 	for ( ; ;) {
-		opt = getopt_long(argc, argv, "c:i:q:", lgopts, &option_index);
+		opt = getopt_long(argc, argv, "c:i:q:m:", lgopts, &option_index);
 		if (opt == EOF)
 			break;
 
@@ -830,7 +859,17 @@ parse_args(int argc, char **argv)
 			port_params[n_ports].iface_queue = 0;
 			n_ports++;
 			break;
-
+		case 'm':
+			if (n_ports == 0) {
+				printf("No port specified for macaddr.\n");
+				return -1;
+			}
+			ret = parse_mac_address(optarg, &port_params[n_ports -1].dstmac);
+			if (ret) {
+				printf("can not parse mac addr %s\n", optarg);
+				return -1;
+			}
+			break;
 		case 'q':
 			if (n_ports == 0) {
 				printf("No port specified for queue.\n");
