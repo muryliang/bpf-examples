@@ -1,1 +1,3 @@
 git commit -m "now can wor, even without bridge, not know why, maybe something with environment, next maybe multithread handle different direction flow, and multiqueue(not ordered"
+
+but first time arp not work, need some query
