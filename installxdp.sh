@@ -32,12 +32,14 @@ echo "begin create"
 #ip addr add 12.0.0.21/24 dev eth7
 #ip addr add 12.0.0.23/24 dev eth9
 sysctl -w net.ipv4.ip_forward=1
+ethtool -L eth7 combined 1
+ethtool -L eth9 combined 1
 ip link set eth7 up
 ip link set eth9 up
-ip link add name br0 type bridge
-ip link set br0 up
-ip link set dev eth7 master br0
-ip link set dev eth9 master br0
+#ip link add name br0 type bridge
+#ip link set br0 up
+#ip link set dev eth7 master br0
+#ip link set dev eth9 master br0
 
 (cd cafwd; ./xskfwd -i eth7 -q 0 -m 68:91:d0:6f:6d:41 -i eth9 -q 0 -c 4 -m 68:91:d0:6f:6d:3f ) &
 #cd cafwd; gdb ./xskfwd 
