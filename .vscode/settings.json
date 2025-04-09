@@ -3,6 +3,7 @@
         "parsing_helpers.h": "c",
         "af_xdp_kern_shared.h": "c",
         "xdpsock.h": "c",
-        "bpf.h": "c"
+        "bpf.h": "c",
+        "bpf_hdr.h": "c"
     }
 }

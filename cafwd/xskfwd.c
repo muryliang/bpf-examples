@@ -737,11 +737,11 @@ static const struct port_params port_params_default = {
 	.xsk_cfg = {
 		.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
 		.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
-		.libxdp_flags = 0,
+		.libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
 		.xdp_flags = XDP_FLAGS_DRV_MODE,
 //		.bind_flags = XDP_USE_NEED_WAKEUP,
-//		.bind_flags = XDP_ZEROCOPY,
-		.bind_flags = 0,
+		.bind_flags = XDP_ZEROCOPY,
+		// .bind_flags = 0,
 	},
 
 	.bp = NULL,
@@ -1064,6 +1064,7 @@ int load_prog(int ifidx) {
 				strerror(xsk_map_fd));
 			exit(EXIT_FAILURE);
 		}
+		printf("map of %d is %d\n", ifidx, xsk_map_fd);
 		return xsk_map_fd;
 }
 int main(int argc, char **argv)

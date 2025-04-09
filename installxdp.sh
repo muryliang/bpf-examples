@@ -1,10 +1,19 @@
 #!/bin/bash
 
 rm -rf /sys/fs/bpf/xdp/dispatch* 
-rm -rf /sys/fs/bpf/{eth1,eth4}
+rm -rf /sys/fs/bpf/{eth7,eth9}
 killall xskfwd 2>/dev/null
-ip addr flush dev eth1
-ip addr flush dev eth4
+ip addr flush dev eth7
+ip addr flush dev eth9
+./xdp-loader unload --all eth7
+./xdp-loader unload --all eth9
+#sysctl -w net.ipv4.conf.eth7.arp_filter=0
+#sysctl -w net.ipv4.conf.eth7.arp_ignore=0
+#sysctl -w net.ipv4.conf.eth7.arp_announce=0
+#sysctl -w net.ipv4.conf.eth9.arp_filter=0
+#sysctl -w net.ipv4.conf.eth9.arp_ignore=0
+#sysctl -w net.ipv4.conf.eth9.arp_announce=0
+ip link del br0
 
 
 if [ "x$1" == "xclean" ]; then
@@ -13,11 +22,24 @@ fi
 sleep .2
 
 echo "begin create" 
+#sysctl -w net.ipv4.conf.eth7.arp_filter=1
+#sysctl -w net.ipv4.conf.eth7.arp_ignore=2
+#sysctl -w net.ipv4.conf.eth7.arp_announce=2
+#sysctl -w net.ipv4.conf.eth9.arp_filter=1
+#sysctl -w net.ipv4.conf.eth9.arp_ignore=2
+#sysctl -w net.ipv4.conf.eth9.arp_announce=2
 # add intf
-ip addr add 12.0.0.21/24 dev eth1
-ip addr add 13.0.0.23/24 dev eth4
-ip link set eth1 up
-ip link set eth4 up
+#ip addr add 12.0.0.21/24 dev eth7
+#ip addr add 12.0.0.23/24 dev eth9
+sysctl -w net.ipv4.ip_forward=1
+ip link set eth7 up
+ip link set eth9 up
+ip link add name br0 type bridge
+ip link set br0 up
+ip link set dev eth7 master br0
+ip link set dev eth9 master br0
 
-(cd cafwd; ./xskfwd -i eth1 -q 0 -i eth4 -q 0 -c 2 ) &
+(cd cafwd; ./xskfwd -i eth7 -q 0 -m 68:91:d0:6f:6d:41 -i eth9 -q 0 -c 3 -m 68:91:d0:6f:6d:3f ) &
+#cd cafwd; gdb ./xskfwd 
+# set args -i eth7 -q 0 -m 68:91:d0:6f:6d:41 -i eth9 -q 0 -c 2 -m 68:91:d0:6f:6d:3f
 echo "done"
