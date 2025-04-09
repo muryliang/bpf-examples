@@ -37,11 +37,11 @@ int xdp_fwd_af_prog(struct xdp_md *ctx)
     int key = ctx->rx_queue_index;
     int *value;
 
-    int ret = parse_pkt__is_ARP(ctx);
+    // int ret = parse_pkt__is_ARP(ctx);
 
-	if (ret == 1) {
-		return XDP_PASS;
-	}
+	// if (ret == 1) {
+	// 	return XDP_PASS;
+	// }
 
     value = bpf_map_lookup_elem(&xsks_map, &key);
     if (value) {
