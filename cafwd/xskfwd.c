@@ -658,12 +658,12 @@ struct thread_data {
 // 	*dst_addr = tmp;
 // }
 
-static void set_mac_addresses(void *data, struct ether_addr *dstmac)
-{
-	struct ether_header *eth = (struct ether_header *)data;
-	struct ether_addr *dst_addr = (struct ether_addr *)&eth->ether_dhost;
-	memcpy(dst_addr, dstmac, sizeof(*dst_addr));
-}
+// static void set_mac_addresses(void *data, struct ether_addr *dstmac)
+// {
+// 	struct ether_header *eth = (struct ether_header *)data;
+// 	struct ether_addr *dst_addr = (struct ether_addr *)&eth->ether_dhost;
+// 	memcpy(dst_addr, dstmac, sizeof(*dst_addr));
+// }
 
 static void *
 thread_func(void *arg)
@@ -690,12 +690,11 @@ thread_func(void *arg)
 
 		/* Process & TX. */
 		for (j = 0; j < n_pkts; j++) {
-			u64 addr = xsk_umem__add_offset_to_addr(brx->addr[j]);
-			u8 *pkt = xsk_umem__get_data(port_rx->params.bp->addr,
-						     addr);
+			// u64 addr = xsk_umem__add_offset_to_addr(brx->addr[j]);
+			// u8 *pkt = xsk_umem__get_data(port_rx->params.bp->addr, addr);
 
 //			swap_mac_addresses(pkt);
-			set_mac_addresses(pkt, &port_rx->params.dstmac);
+//			set_mac_addresses(pkt, &port_rx->params.dstmac);
 
 			btx->addr[btx->n_pkts] = brx->addr[j];
 			btx->len[btx->n_pkts] = brx->len[j];
@@ -739,8 +738,8 @@ static const struct port_params port_params_default = {
 		.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
 		.libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
 		.xdp_flags = XDP_FLAGS_DRV_MODE,
-//		.bind_flags = XDP_USE_NEED_WAKEUP,
-		.bind_flags = XDP_ZEROCOPY,
+		// .bind_flags = XDP_USE_NEED_WAKEUP,
+		.bind_flags = XDP_ZEROCOPY | XDP_USE_NEED_WAKEUP
 		// .bind_flags = 0,
 	},
 
