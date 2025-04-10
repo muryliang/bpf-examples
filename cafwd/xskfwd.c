@@ -492,6 +492,7 @@ port_init(struct port_params *params)
 	    (bcache_slab_size(p->bc) < umem_fq_size) ||
 	    (bcache_cons_check(p->bc, umem_fq_size) < umem_fq_size)) {
 		port_free(p);
+		fprintf(stderr, "failed here1\n");
 		return NULL;
 	}
 
@@ -507,6 +508,7 @@ port_init(struct port_params *params)
 					   &params->xsk_cfg);
 	if (status) {
 		port_free(p);
+		fprintf(stderr, "failed here %d\n", status);
 		return NULL;
 	}
 
@@ -738,8 +740,8 @@ static const struct port_params port_params_default = {
 		.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
 		.libxdp_flags = XSK_LIBXDP_FLAGS__INHIBIT_PROG_LOAD,
 		.xdp_flags = XDP_FLAGS_DRV_MODE,
-		// .bind_flags = XDP_USE_NEED_WAKEUP,
-		.bind_flags = XDP_ZEROCOPY | XDP_USE_NEED_WAKEUP
+		.bind_flags = XDP_USE_NEED_WAKEUP,
+		// .bind_flags = XDP_ZEROCOPY | XDP_USE_NEED_WAKEUP
 		// .bind_flags = 0,
 	},
 
