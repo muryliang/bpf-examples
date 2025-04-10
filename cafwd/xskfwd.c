@@ -557,7 +557,8 @@ port_rx_burst(struct port *p, struct burst_rx *b)
 	}
 
 	xsk_ring_cons__release(&p->rxq, n_pkts);
-	p->n_pkts_rx += n_pkts;
+	// p->n_pkts_rx += n_pkts;
+	__atomic_store_n(&p->n_pkts_rx, p->n_pkts_rx + n_pkts, __ATOMIC_RELEASE);
 
 	/* UMEM FQ. */
 	for ( ; ; ) {
@@ -626,7 +627,8 @@ port_tx_burst(struct port *p, struct burst_tx *b)
 	xsk_ring_prod__submit(&p->txq, n_pkts);
 	if (xsk_ring_prod__needs_wakeup(&p->txq))
 		sendto(xsk_socket__fd(p->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
-	p->n_pkts_tx += n_pkts;
+	// p->n_pkts_tx += n_pkts;
+	__atomic_store_n(&p->n_pkts_tx, p->n_pkts_tx + n_pkts, __ATOMIC_RELEASE);
 }
 
 /*
@@ -678,7 +680,7 @@ thread_func(void *arg)
 	CPU_SET(t->cpu_core_id, &cpu_cores);
 	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_cores);
 
-	for (i = 0; !t->quit; i = (i + 1) & (t->n_ports_rx - 1)) {
+	for (i = 0; !t->quit; i = (i + 1) & (t->n_ports_rx/2 - 1)) {
 		struct port *port_rx = t->ports_rx[i];
 		struct port *port_tx = t->ports_tx[i];
 		struct burst_rx *brx = &t->burst_rx;
@@ -893,12 +895,12 @@ parse_args(int argc, char **argv)
 		return -1;
 	}
 
-	if (!n_threads) {
-		printf("No threads specified.\n");
+	if (!n_threads || n_threads % 2) {
+		printf("No threads specified. or not even, we can not seperate tx and rx\n");
 		return -1;
 	}
 
-	if (n_ports % n_threads) {
+	if (n_ports % (n_threads / 2)) {
 		printf("Ports cannot be evenly distributed to threads.\n");
 		return -1;
 	}
@@ -924,7 +926,7 @@ print_thread(u32 thread_id)
 	printf("Thread %u (CPU core %u): ",
 	       thread_id, t->cpu_core_id);
 
-	for (i = 0; i < t->n_ports_rx; i++) {
+	for (i = 0; i < t->n_ports_rx/3; i++) {
 		struct port *port_rx = t->ports_rx[i];
 		struct port *port_tx = t->ports_tx[i];
 
@@ -974,19 +976,21 @@ print_port_stats(int port_id, u64 ns_diff)
 {
 	struct port *p = ports[port_id];
 	double rx_pps, tx_pps;
+	u64 rx = __atomic_load_n(&p->n_pkts_rx, __ATOMIC_ACQUIRE);
+	u64 tx = __atomic_load_n(&p->n_pkts_tx, __ATOMIC_ACQUIRE);
 
-	rx_pps = (p->n_pkts_rx - n_pkts_rx[port_id]) * 1000000000. / ns_diff;
-	tx_pps = (p->n_pkts_tx - n_pkts_tx[port_id]) * 1000000000. / ns_diff;
+	rx_pps = (rx - n_pkts_rx[port_id]) * 1000000000. / ns_diff;
+	tx_pps = (tx - n_pkts_tx[port_id]) * 1000000000. / ns_diff;
 
 	printf("| %4d | %12llu | %13.0f | %12llu | %13.0f |\n",
 	       port_id,
-	       p->n_pkts_rx,
+	       rx,
 	       rx_pps,
-	       p->n_pkts_tx,
+	       tx,
 	       tx_pps);
 
-	n_pkts_rx[port_id] = p->n_pkts_rx;
-	n_pkts_tx[port_id] = p->n_pkts_tx;
+	n_pkts_rx[port_id] = rx;
+	n_pkts_tx[port_id] = tx;
 }
 
 static void
@@ -1111,14 +1115,26 @@ int main(int argc, char **argv)
 	printf("All ports created successfully.\n");
 
 	/* Threads. */
-	for (i = 0; i < n_threads; i++) {
+	for (i = 0; i < n_threads; i+=2) {
 		struct thread_data *t = &thread_data[i];
-		u32 n_ports_per_thread = n_ports / n_threads, j;
+		u32 n_ports_per_thread = n_ports / (n_threads / 2), j;
 
-		for (j = 0; j < n_ports_per_thread; j++) {
+		for (j = 0; j < n_ports_per_thread / 2; j++) {
 			t->ports_rx[j] = ports[i * n_ports_per_thread + j];
 			t->ports_tx[j] = ports[i * n_ports_per_thread +
 				(j + 1) % n_ports_per_thread];
+		}
+
+		t->n_ports_rx = n_ports_per_thread;
+
+		print_thread(i);
+
+		t = &thread_data[i + 1];
+
+		for (j = 0; j < n_ports_per_thread / 2; j++) {
+			t->ports_rx[j] = ports[i * n_ports_per_thread +
+				(j + 1) % n_ports_per_thread];
+			t->ports_tx[j] = ports[i * n_ports_per_thread + j];
 		}
 
 		t->n_ports_rx = n_ports_per_thread;

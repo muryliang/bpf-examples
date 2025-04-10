@@ -48,12 +48,12 @@ ip link set eth7 promisc on
 ip link set eth9 promisc on
 ip link set eth7 allmulticast on
 ip link set eth9 allmulticast on
-#ip link add name br0 type bridge
-#ip link set br0 up
-#ip link set dev eth7 master br0
-#ip link set dev eth9 master br0
+ip link add name br0 type bridge
+ip link set br0 up
+ip link set dev eth7 master br0
+ip link set dev eth9 master br0
 
-(cd cafwd; ./xskfwd -i eth7 -q 0 -m 68:91:d0:6f:6d:41 -i eth9 -q 0 -c 4 -m 68:91:d0:6f:6d:3f ) &
+#(cd cafwd; ./xskfwd -i eth7 -q 0 -m 68:91:d0:6f:6d:41 -i eth9 -q 0 -c 1 -c 2 -m 68:91:d0:6f:6d:3f ) 
 #cd cafwd; gdb ./xskfwd 
 # set args -i eth7 -q 0 -m 68:91:d0:6f:6d:41 -i eth9 -q 0 -c 2 -m 68:91:d0:6f:6d:3f
 echo "done"
