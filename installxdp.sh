@@ -46,8 +46,10 @@ ip link set eth9 up
 # must be needed for afxdp to work on arp, bridge auto set this
 ip link set eth7 promisc on
 ip link set eth9 promisc on
+ip link set eth7 allmulticast on
+ip link set eth9 allmulticast on
 #ip link add name br0 type bridge
-##ip link set br0 up
+#ip link set br0 up
 #ip link set dev eth7 master br0
 #ip link set dev eth9 master br0
 
